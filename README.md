@@ -24,21 +24,26 @@ publishes and maps them automatically.
 
 # Example:
 
-```python
 ### models.py ###
+```python
 from django.db import models
 
 class BlogPost(models.Model):
     slug = models.SlugField()
     title = models.CharField()
     text = models.TextField()
+```
 
 ### views.py ###
+```python
 from my_site.models import BlogPost
-from django_viewsets.decorators import action
-from django_viewsets import ViewSet, ModelViewSet
+from viewsets.decorators import detail
+from viewsets import ViewSet, ModelViewSet
 
 class HomePage(ViewSet):
+    """
+    A simple handler for the home page index.
+    """
     template_dir = 'home'
 
     def index(self, request):
@@ -51,11 +56,22 @@ class BlogViewSet(ModelViewSet):
 
     # list, detail, create, destroy already included
 
-    @action(detail=True)
+    @detail()
     def stats(self, request, slug):
         post = self.get_object(slug=slug)
         # render assumes template = action name otherwise:
         return self.render(post, template='blog_stats')
-
 ```
 
+### urls.py ###
+```python
+from django.conf.urls import url, include
+from viewsets.routers import DefaultRouter
+from views import HomePage, BlogViewSet
+
+router = DefaultRouter()
+router.add('^', HomePage, 'home')
+router.add('blog', BlogViewSet)
+
+urlpatterns = [url(r'^', include(router.urls)),]
+```
