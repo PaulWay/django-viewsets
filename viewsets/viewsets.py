@@ -25,7 +25,8 @@ This borrows heavily from Django REST Framework's idea of ViewSets.
 from inspect import getmembers
 
 from django.forms.utils import pretty_name
-from django.view.generic import View
+from django.utils.decorators import classonlymethod
+from django.views.generic import View
 
 
 
