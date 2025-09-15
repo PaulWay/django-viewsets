@@ -10,17 +10,31 @@ that router.  For example:
     router.register('art', GalleryViewSet, basename='gallery')
 
     urlpatterns = router.urls
+
+Each ViewSet then describes the paths it serves to the router, and this then
+creates the full list of URL patterns.  Essentially this should take the
+place of the 'include' pattern of:
+
+    urlpatterns = [
+        ...
+        path(r'blog', include('blogs.urls')),
+    ]
+
+and then having to have the 'blogs' urls.py then list all the paths the
+BlogViewSet accepts.
 """
 
 from collections import namedtuple
 
 # Copied and adapted gratefully from Django REST Framework
 
-Route = namedtuple('Route', ['url', 'mapping', 'name', 'detail', 'initkwargs'])
-DynamicRoute = namedtuple('DynamicRoute', ['url', 'name', 'detail', 'initkwargs'])
+Route = namedtuple('Route', ['url', 'name', 'detail', 'initkwargs'])
 
 
 class BaseRouter:
+    """
+    Mostly copied from DRF...
+    """
     def __init__(self):
         self.registry = []
 
@@ -54,47 +68,17 @@ class BaseRouter:
 
 
 class SimpleRouter(BaseRouter):
+    """
+    Mostly copied from DRF...
+    """
 
     routes = [
         # List route.
         Route(
             url=r'^{prefix}{trailing_slash}$',
-            mapping={
-                'get': 'list',
-                'post': 'create'
-            },
             name='{basename}-list',
             detail=False,
             initkwargs={'suffix': 'List'}
-        ),
-        # Dynamically generated list routes. Generated using
-        # @action(detail=False) decorator on methods of the viewset.
-        DynamicRoute(
-            url=r'^{prefix}/{url_path}{trailing_slash}$',
-            name='{basename}-{url_name}',
-            detail=False,
-            initkwargs={}
-        ),
-        # Detail route.
-        Route(
-            url=r'^{prefix}/{lookup}{trailing_slash}$',
-            mapping={
-                'get': 'retrieve',
-                'put': 'update',
-                'patch': 'partial_update',
-                'delete': 'destroy'
-            },
-            name='{basename}-detail',
-            detail=True,
-            initkwargs={'suffix': 'Instance'}
-        ),
-        # Dynamically generated detail routes. Generated using
-        # @action(detail=True) decorator on methods of the viewset.
-        DynamicRoute(
-            url=r'^{prefix}/{lookup}/{url_path}{trailing_slash}$',
-            name='{basename}-{url_name}',
-            detail=True,
-            initkwargs={}
         ),
     ]
 
@@ -123,9 +107,13 @@ class SimpleRouter(BaseRouter):
 
         Returns a list of the Route namedtuple.
         """
-        # converting to list as iterables are good for one pass, known host needs to be checked again and again for
-        # different functions.
-        known_actions = list(flatten([route.mapping.values() for route in self.routes if isinstance(route, Route)]))
+        # converting to list as iterables are good for one pass, known host
+        # needs to be checked again and again for different functions.
+        known_actions = list(flatten([
+            route.mapping.values()
+            for route in self.routes
+            if isinstance(route, Route)
+        ]))
         extra_actions = viewset.get_extra_actions()
 
         # checking action names against the known actions list
@@ -142,42 +130,7 @@ class SimpleRouter(BaseRouter):
         detail_actions = [action for action in extra_actions if action.detail]
         list_actions = [action for action in extra_actions if not action.detail]
 
-        routes = []
-        for route in self.routes:
-            if isinstance(route, DynamicRoute) and route.detail:
-                routes += [self._get_dynamic_route(route, action) for action in detail_actions]
-            elif isinstance(route, DynamicRoute) and not route.detail:
-                routes += [self._get_dynamic_route(route, action) for action in list_actions]
-            else:
-                routes.append(route)
-
-        return routes
-
-    def _get_dynamic_route(self, route, action):
-        initkwargs = route.initkwargs.copy()
-        initkwargs.update(action.kwargs)
-
-        url_path = escape_curly_brackets(action.url_path)
-
-        return Route(
-            url=route.url.replace('{url_path}', url_path),
-            mapping=action.mapping,
-            name=route.name.replace('{url_name}', action.url_name),
-            detail=route.detail,
-            initkwargs=initkwargs,
-        )
-
-    def get_method_map(self, viewset, method_map):
-        """
-        Given a viewset, and a mapping of http methods to actions,
-        return a new mapping which only includes any mappings that
-        are actually implemented by the viewset.
-        """
-        bound_methods = {}
-        for method, action in method_map.items():
-            if hasattr(viewset, action):
-                bound_methods[method] = action
-        return bound_methods
+        return self.routes
 
     def get_lookup_regex(self, viewset, lookup_prefix=''):
         """
@@ -207,11 +160,6 @@ class SimpleRouter(BaseRouter):
             routes = self.get_routes(viewset)
 
             for route in routes:
-
-                # Only actions which actually exist on the viewset will be bound
-                mapping = self.get_method_map(viewset, route.mapping)
-                if not mapping:
-                    continue
 
                 # Build the url pattern
                 regex = route.url.format(
