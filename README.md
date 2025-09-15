@@ -51,9 +51,11 @@ class BlogPost(models.Model):
 
 ### views.py ###
 ```python
+import time
+
 from my_site.models import BlogPost
-from viewsets.decorators import action
-from viewsets import ViewSet, ModelViewSet
+
+from viewsets import action, ViewSet, ModelViewSet
 
 class HomePage(ViewSet):
     """
@@ -61,8 +63,11 @@ class HomePage(ViewSet):
     """
     template_dir = 'home'
 
-    def index(self, request):
-        return self.render()
+    @action()
+    def about(self, request):
+        return {
+            'currently': time.time()
+        }
 
 class BlogViewSet(ModelViewSet):
     lookup_field = 'slug'
