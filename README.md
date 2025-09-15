@@ -37,7 +37,7 @@ class BlogPost(models.Model):
 ### views.py ###
 ```python
 from my_site.models import BlogPost
-from viewsets.decorators import detail
+from viewsets.decorators import action
 from viewsets import ViewSet, ModelViewSet
 
 class HomePage(ViewSet):
@@ -50,28 +50,28 @@ class HomePage(ViewSet):
         return self.render()
 
 class BlogViewSet(ModelViewSet):
-    lookup = 'slug'
+    lookup_field = 'slug'
     queryset = BlogPost.objects.all()
     template_dir = 'home/blog'
 
     # list, detail, create, destroy already included
 
-    @detail()
+    @action(detail=True)
     def stats(self, request, slug):
         post = self.get_object(slug=slug)
-        # render assumes template = action name otherwise:
-        return self.render(post, template='blog_stats')
+        # View methods return a context to be sent to the relevant template
+        return {
+            'mentions': post.mention_set.count()
+        }
 ```
 
 ### urls.py ###
 ```python
-from django.conf.urls import url, include
-from viewsets.routers import DefaultRouter
+from django.conf.urls import path, include
 from views import HomePage, BlogViewSet
 
-router = DefaultRouter()
-router.add('^', HomePage, 'home')
-router.add('blog', BlogViewSet)
-
-urlpatterns = [url(r'^', include(router.urls)),]
+urlpatterns = [
+    path(r'^', include(HomePage.get_urls())),
+    path(r'^blog/', include(BlogViewSet.get_urls())),
+]
 ```
