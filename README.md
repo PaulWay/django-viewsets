@@ -22,6 +22,21 @@ publishes and maps them automatically.
 
 **django-viewsets** provides the best of both worlds for Django users.
 
+# Goals:
+
+Django-viewsets aims to provide:
+
+- A single class for the views that handle all the URL endpoints in a path.
+- Standard methods handle the index and detail views, as well as editing an
+  object (in a mix-in, so you can add it if you want).
+- Standard Django-compatible `get_queryset` and `get_object` methods for
+  selecting data.
+- Methods handle the incoming request and return a context.
+- The class selects the template for each view based on its method name.
+- It should be explicit which methods in a class are actually used to handle
+  URLs within the path, using the `@action` decorator.
+
+
 # Example:
 
 ### models.py ###
