@@ -22,15 +22,54 @@ automatically:
 This borrows heavily from Django REST Framework's idea of ViewSets.
 """
 
-from inspect import getmembers
+from inspect import signature
 
 from django.forms.utils import pretty_name
 from django.utils.decorators import classonlymethod
 from django.views.generic import View
 
+"""
+    Alternate idea from Raphael Gaschinard at PyCon AU 2024 - any method that
+    has 'request' as its first argument is going to be considered as a view
+    method.  Then the presence of the
 
+    def view_detail_param(self, view):
+        " ""
+        If the given view is a detail view, it has a named parameter after the
+        'request' parameter.
+        " ""
+        sig = signature(view)
+        if 'request' not in sig.parameters:
+            return None
+        found_request = False
+        # Assumes we step through parameters in given order
+        for param, pval in sig.parameters.items():
+            if found_request:
+                # next parameter is detail parameter
+                return pval
+            if param == 'request':
+                found_request = True
+        return False
 
-def action(methods=None, detail=False, url_path=None, url_name=None, **kwargs):
+"""
+
+"""
+Alternate ideas from FunkyBob:
+
+Try to work with Django's generic class-based views as much as possible, by
+supporting interface methods like get_object(), get_queryset(), and so on.
+
+I'm still struggling with this, because Django's CBGVs are based on providing
+methods for each HTTP verb ('get', 'post', etc) and I am trying to provide
+methods named for the paths they handle (with 'index' and 'detail' being
+special).
+
+Certainly I think trying to provide the same helper method interfaces - having
+a 'get_X' to override a 'X' attribute in the class, for example.
+
+"""
+
+def action(detail=False, url_path=None, url_name=None, **kwargs):
     """
     Decorate a ViewSet method with this decorator and it will be added to the
     list of endpoints that the ViewSet allows HTTP access to.
@@ -40,8 +79,6 @@ def action(methods=None, detail=False, url_path=None, url_name=None, **kwargs):
 
     Liberally copied from DRF's @action decorator.
 
-    :param methods: a list of HTTP methods that action responds to.
-        Defaults to GET only.
     :param detail: whether this action applies to instance (detail) requests.  If
         `False`, it applies to collection (list) requests.
     :param url_path: The URL segment for this action, defaulting to the
@@ -52,15 +89,7 @@ def action(methods=None, detail=False, url_path=None, url_name=None, **kwargs):
     :param kwargs: Additional properties to set on this view.  This is used
         to override viewset-level settings (if any).
     """
-    methods = ['get'] if methods is None else methods
-    methods = [method.lower for method in methods]
-
     def decorator(func):
-        # Was: func.mapping = MethodMapper(func, methods)
-        func.mapping = {
-            method: func.__name__
-            for method in methods
-        }
         func.detail = detail
         func.url_path = url_path if url_path else func.__name__
         func.url_name = url_name if url_name else func.__name__.replace('_', '-')
@@ -70,68 +99,116 @@ def action(methods=None, detail=False, url_path=None, url_name=None, **kwargs):
             func.kwargs['name'] = pretty_name(func.__name__)
         func.kwargs['description'] = func.__doc__
 
+        # Add this view to its class's actions list.
+        func.__self__.__class__._actions.append(func)
+
         return func
     return decorator
 
 
 class ViewSetMixin:
     """
-    The basic ViewSet mixin provides the mapping from instance methods in the
-    class to names that appear in the URLs handled by this ViewSet.
+    Viewsets implement a collection of views all based on a common URL path.
+
+    The main mechanism of working with a ViewSet is to define views using the
+    '@action' decorator above, and then to use:
+
+    `path(r'^path/', include(ThisViewSet.get_urls())),`
+
+    In the `urls.py` to include all the URLs handled by that ViewSet.
+    """
+    lookup_field = 'pk'
+    _actions = []
+    base_path = ''
+
+    def get_base_path(self, base_path=None):
+        """
+        Return the base path, or default for class.
+        """
+        if base_path is not None:
+            return base_path
+        return self.base_path
+
+    def get_template_name(self, view, base_path):
+        """
+        Determine the template path to use for this view.
+        """
+        return f"{base_path}/{view.name}.html"
+
+    def get_detail_param_path(self, view):
+        """
+        Determine how to represent the detail parameter in the URL path
+        """
+        # Should this be in the ModelViewSet?
+        # if not hasattr(self, '_param_url_type'):
+        # return f"<>"
+        return NotImplementedError(
+            "View parameters are not handled"
+        )
+
+    def get_view_path(self, view, base_path):
+        """
+        Resolve the view path for urls.py
+        """
+        # Trailing slash handling?
+        if view.detail:
+            if view.name == 'detail':
+                view_path = ''
+            else:
+                view_path = view.url_path
+            return f"^{base_path}/{view_path}"
+        else:
+            if view.name == 'index':
+                view_path = ''
+            else:
+                view_path = view.url_path
+            detail_param = self.get_detail_param_path(view)
+            return f"^{base_path}/{detail_param}/{view_path}"
+
+    def get_view_wrapper(self, view, base_path):
+        """
+        The bit that does the real work - similar to `as_view` in Django's
+        generic view classes.  Returns a function that will be called when
+        this URL is requested.  This:
+        - gets the default context for this viewset
+        - updates that with the context from the called view method
+        - determines the template for this view
+        - returns render_to_response(template, context)
+        """
+        def wrapper(self, request, *args, **kwargs):
+            context = self.get_view_context()
+            context.update(view(request, *args, **kwargs))
+            template = self.get_template_name(view, base_path)
+            return render(request, template, context)
+
+    def get_urls(self):
+        """
+        Return a valid list of paths for Django to use in an 'include' URL
+        definition.
+        """
+        base_path = self.get_base_path()
+        return [
+            path(
+                self.get_view_path(view, base_path),
+                self.get_response(view, base_path)
+                name=self.get_view_name(view)
+            ),
+            for view in self._actions
+        ]
+
+
+class ViewSet(ViewSetMixin):
+    """
+    Standard view starts with just the index.
     """
 
-    __endpoints = list()
-
-    @classonlymethod
-    def as_view(cls, actions=None, **initkwargs):
-        """
-        Select the view function from the methods this viewset supports.
-        This is different from the standard View class `as_view` method,
-        ...
-        """
-        # Borrowing liberally from DRF's viewsets.py
-        cls.name = None
-        cls.description = None
-        cls.basename = None
-        if not actions:
-            raise TypeError(
-                "The `actions` argument must be provided when calling "
-                "`.as_view()` on a ViewSet, as a dictionary mapping HTTP "
-                "methods (in lower case) to the viewset methods to handle them"
-            )
-        # sanitise keyword arguments, as per viewsets.py
-        for key in initkwargs:
-            if key in cls.http_method_names:
-                raise TypeError(
-                    "You should not pass in the %s method name as a "
-                    "keyword to %s()" % (key, cls.__name__)
-                )
-            if not hasattr(cls, key):
-                raise TypeError(
-                    "%s() received an invalid keyword %r" % (cls.__name__, key)
-                )
-
-        def view(request, *args, **kwargs):
-            self = cls(**initkwargs)
-            if 'get' in actions and 'head' not in actions:
-                actions['head'] = actions['get']
-            self.action_map = actions
-            # Bind HTTP methods to class methods
-            for method, action in actions.items():
-                handler = getattr(self, action)
-                setattr(self, method, handler)
-            self.request = request
-            self.args = args
-            self.kargs = kwargs
-            return self.dispatch(request, *args, **kwargs)
-
-        update_wrapper(view, cls, updated=())
-        update_wrapper(view, cls.dispatch, assigned=())
-        view.cls = cls
-        view.initkwargs = initkwargs
-        view.actions = actions
-        return csrf_exempt(view)
+    def index(self, request):
+        return {
+            'context': request
+        }
 
 
-class ViewSet(View, ViewSetMixin):
-    pass
+class ModelViewSet(ViewSetMixin):
+    """
+
+    """
